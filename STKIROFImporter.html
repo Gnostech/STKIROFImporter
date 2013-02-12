@@ -1,0 +1,403 @@
+<!-- Joseph R Mountain Jr - Gnostech - 1/28/2013 -->
+<!--Upated to include a sort routine for RouteArray
+<!-- joseph.mountain@gnostech.com
+<!--Adapted from the AGI FalconViewImporter Tool-->
+
+<html>
+  <head>
+	<style>
+	a:link, a:visited {
+	font: 10pt Verdana;
+	color: #87CEFA;
+	}
+	.normal {
+		font: 10pt Verdana;
+		color: #EDEDED;
+	}
+	.boldNormal {
+		font: 10pt Verdana;
+		color: #EDEDED;
+		font-weight: bold;
+	}
+	.italicNormal {
+		font: 10pt Verdana;
+		color: #EDEDED;
+		font-style: italic;
+	}
+	html,body {
+		background-color: Gray;
+	}
+	h1 {
+		font: 16pt Verdana Bold;
+		margin-bottom: 3px;
+		margin-top: 3px;
+		color: Black;
+	}
+	h2 {
+		font: 14pt Verdana Bold;
+		margin-bottom: 3px;
+		margin-top: 3px;
+		color: Silver;
+	}
+	</style>
+	<script language="VBScript">
+	dim IROFFile
+
+	sub getRoutes()
+	set IROFFile = CreateObject("Microsoft.XMLDOM")
+	IROFFile.async = "false"
+	IROFFile.load(IROFPath.value)
+	IROFFile.SetProperty "SelectionLanguage", "XPath"
+	set RouteNodes = IROFFile.documentElement.selectNodes("PROF/MISSION_ID/text()")
+	If RouteNodes Is Nothing then
+		msgbox "Mission ID Missing"
+	Else
+		for each x in RouteNodes
+		text = x.xml
+				msgbox "Mission ID Found" &text
+	next
+	End If
+	End Sub
+
+	function dQ(inStr)
+	dQ = chr(34) & inStr & chr(34)
+	end function
+
+	function sendCmd(cmdStr, returnData)
+	set uiApp = window.external
+	set stk = uiApp.personality
+	on error resume next
+	set list = stk.ExecuteCommand(cmdStr)
+	if err <> 0 then
+		msgbox "This command failed: " & vbcrlf & vbcrlf & cmdStr
+	end if
+		if returnData = True & list.Count >= 0 then
+		redim preserve returnArray(list.Count)
+			for i = 0 to (list.Count - 1)
+			returnArray(i) = replace(trim(list(i)),chr(10),"")
+			next
+		sendCmd = returnArray
+		end if
+	set stk = nothing
+	set uiApp = nothing
+	end function
+
+	sub convertIROF2GA()
+	'INPUTS: IROF.xml file, the IROFFile is a public object set in getRoutes()
+	'OUTPUTS: .GA File in the same location as the IROF.xml file
+	if checkInputs() = false then
+		exit sub
+	end if
+	
+	set LatitudeNodes = IROFFile.documentElement.selectNodes("/PROF/*/POINT/LATITUDE/text()")
+	set LongitudeNodes = IROFFile.documentElement.selectNodes("/PROF/*/POINT/LONGITUDE/text()")
+	if LatitudeNodes.Length <> LongitudeNodes.Length Then
+		msgbox("The number of Lattitude points retrieved does not equal the number of Longitude points retrieved") 'assumption made to grab lat and lon points independently
+		exit sub
+	end if
+	set AltitudeNodes = IROFFile.documentElement.selectNodes("/PROF/*/POINT/ALTITUDE/text()")
+	set TimeNodes = IROFFile.documentElement.selectNodes("/PROF/*/POINT/TIME/text()")
+
+	
+	'get the latitude points
+	dim LatPoint
+	cnt = 0
+	'msgbox "Number of Latitude Points" & LatitudeNodes.Length
+	If LatitudeNodes.Length = 0 Then
+		msgbox "No Latitude Points in the file!"
+	Else
+		for each LatPoint in LatitudeNodes
+			redim preserve routeArray(4, cnt)
+			routeArray(0, cnt) = LatPoint.text
+			cnt = cnt + 1
+		next
+	End If
+	
+	
+	
+	'get the longitude points
+	dim LongPoint
+	cnt = 0
+	'msgbox "Number of Longtitude Points" & LongitudeNodes.Length
+	If LongitudeNodes.Length = 0 Then
+		msgbox "No Longitude Points in the file!"
+	Else
+		for Each LongPoint In LongitudeNodes
+			routeArray(1, cnt) = LongPoint.text
+			cnt = cnt + 1
+		next
+	End if
+	
+	'get the altitude points
+	dim AltPoint
+	cnt = 0
+	If AltitudeNodes.Length = 0 Then
+		msgbox "No Altitude Points in the file!"
+	Else
+		for Each AltPoint In AltitudeNodes
+			routeArray(2, cnt) = AltPoint.text
+			cnt = cnt + 1
+		next
+	End If
+	
+	'get the time points
+	dim TimePoint
+	cnt = 0
+	for Each TimePoint In TimeNodes 
+		routeArray(3, cnt) = fixTime(TimePoint.text)
+		cnt = cnt + 1
+	next
+	
+	'DoubleQuote is required to JulianDate processing
+	doublequote = Chr(34)
+		
+	'Sort the routeArray by Julian Date so that it is in increasing values in order for import into STK 
+	'oldcnt = ubound(routeArray,2)
+	'cnt = oldcnt + 1
+	
+	'Dim STKArray
+	'STKArray =  routeArray(4,oldcnt)
+	'STKArray = SortArray(routeArray,3,"")
+	'newcnt = ubound(STKArray,2)
+	'msgbox "Items in the new STKArray " & newcnt
+	'for j = 0 To cnt
+	'	msgbox "AddWaypoint */Aircraft/" & acNameText.value & " DetVelFromTime " & round(routeArray(0, j), 3) & " " & round(routeArray(1, j), 3) & " " & round(routeArray(2, j), 3) & " " & Chr(34) & routeArray(3, j) & Chr(34)
+	'	msgbox "Time is: " & routeArray(3,j)
+	'next
+	
+	
+	'Begin handoff to STK
+	routecnt = ubound(routeArray,2)
+	routecnt = routecnt + 1
+	'msgbox "routeArray contains " & routecnt  & " waypoints"
+	returnObj = sendCmd("SetUnits / Meter", False)
+	returnObj = sendCmd("SetUnits / JulianDate", False)
+	returnObj = sendCmd("New / */Aircraft " & acNameText.value, False)
+	'returnObj = sendCmd("AddWaypoint */Aircraft/" & acNameText.value & " DetVelFromTime " & " 34.856 " & " -99.422 "  & " 30000 "  & Chr(34) & routeArray(3, i) & Chr(34), False)
+	'i = ubound(routeArray,2)
+	for i = 1 To routecnt
+		'msgbox "waypoint # "  & i & "  has time " & Chr(34) & routeArray(3, i) & Chr(34) & "for " & " "  & round(routeArray(0,i),3) & " " & round(routeArray(1,i),3)
+		'msgbox "AddWaypoint */Aircraft/" & acNameText.value & " DetVelFromTime " & round(routeArray(0, i), 3) & " " & round(routeArray(1, i), 3) & " " & round(routeArray(2, i), 3) & " " & Chr(34) & routeArray(3, i) & Chr(34)
+		returnObj = sendCmd("AddWaypoint */Aircraft/" & acNameText.value & " DetVelFromTime " & round(routeArray(0, i), 3) & " " & round(routeArray(1, i), 3) & " " & round(routeArray(2, i), 3) & " " & Chr(34) & routeArray(3, i) & Chr(34), False)
+		'i = i - 1
+	next
+	returnObj = sendCmd("GetEpoch */Aircraft/" & acNameText.value, True)
+	epochTime = returnObj(0)
+	returnObj = sendCmd("SetGreatArcStart */Aircraft/" & acNameText.value & " " & dQ(epochTime), False)
+	End Sub
+
+	function checkInputs()
+	if acNameText.value = "" then
+		msgbox "You must enter an aircraft name."
+		checkInputs = false
+		exit function
+	end if
+	checkInputs = true
+	end function
+
+
+	function fixLat(inData)
+	inData = Replace(inData, " ", "")
+	dataStr = Mid(inData, 2, Len(inData) - 1)
+	WayPointLatitude = CDbl(Mid(dataStr, 1, 2)) + CDbl(Mid(dataStr, 3, 2)) / 60 + CDbl(Mid(dataStr, 5, 6)) / 3600
+	'correct if lat is southern hemisphere
+	if Mid(inData, 1, 1) = "S" Then
+		WayPointLatitude = WayPointLatitude * -1
+	end if
+	fixLat = WayPointLatitude
+	end function
+
+	function fixLon(inData)
+	inData = Replace(inData, " ", "")
+	dataStr = Mid(inData, 2, Len(inData) - 1)
+	WayPointLongitude = CDbl(Mid(dataStr, 1, 3)) + CDbl(Mid(dataStr, 4, 2)) / 60 + CDbl(Mid(dataStr, 6, 6)) / 3600
+	if Mid(inData, 1, 1) = "-" then
+	WayPointLongitude = WayPointLongitude * -1
+	end if
+	fixLon = longitude
+	End Function
+	
+	function fixAlt(inData)
+	inData = Replace(inData, " ", "")
+	WayPointAltitude = inData
+	fixAlt = WayPointAltitude
+	end function
+	
+	function fixTime(inData)
+	'inData = Replace(inData, " ", "")
+	'dataStr = Mid(inData, 2, Len(inData) - 1)
+	dataStr = inData
+	WayPointYear = Mid(dataStr,1,4) 
+	WayPointMonth = Mid(dataStr,5,2)
+	WayPointDay = Mid(dataStr,7,2)
+	WayPointHour = Mid(dataStr,9,2)
+	WayPointMinute = Mid(dataStr,11,2)
+	WayPointSec = Mid(dataStr,13,2)
+	'msgbox "IROF date/Time=" & WayPointYear &" " & WayPointMonth & " " & WayPointDay & " " & WayPointHour & " " & WayPointMinute & " " & WayPointSec
+	fixTime = jd(WayPointYear, WayPointMonth,WayPointDay,WayPointHour, WayPointMinute,WayPointSec)
+	'msgbox "Julian Date " & fixtime
+	end function
+
+	'function usage: jd(YEAR, MONTH, DAY of MONTH, HOUR, MINUTES, SECONDS)
+	' the function 'jd' adapted to vbscript from a jscript
+	' function by Dan Burton from a web page at
+	' http://www.isc.tamu.edu/~astro/javascript/julianday.html
+
+	function jd(yy, mm, dd, hr, mn, sec)
+	'correct original which didn't properly handle BCE dates
+	if yy < 0 then
+		yy = yy + 1
+	end if
+	hr = hr + (mn / 60) + sec/3600
+	ggg = 1
+	if yy <= 1585 then
+	ggg = 0 
+	end if
+	jd = -1 * Int(7 * (Int((mm + 9) / 12) + yy) / 4)
+	s = 1
+	if (mm - 9) < 0 then
+		s = -1
+	end if
+	a = abs(mm - 9)
+	j1 = Int(yy + s * Int(a / 7))
+	j1 = -1 * Int((Int(j1 / 100) + 1) * 3 / 4)
+	jd = jd + Int(275 * mm / 9) + dd + (ggg * j1)
+	jd = jd + 1721027 + 2 * ggg + 367 * yy - 0.5
+	jd = round(jd + (hr / 24), 5)
+	end function
+	
+	'**************************************
+    ' Name: Sort Multidimensional Array func
+    '     tion in VB Script
+    ' Description:Sorts Multidimensional Arr
+    '     ays
+    ' By: Matt Tracey
+    '
+    '
+    ' Inputs:laArrIn(): the array to sort
+    'lnCol: the column to sort on
+    'lcType: the type of sort to perform
+    'There are only 2 types of sort at the moment:
+    '	"" - a String Sort
+    '	"date" - a Date Sort
+    '
+    ' Returns:A Sorted Array variable
+    '
+    'Assumes:None
+    '
+    'Side Effects:None
+    'This code is copyrighted and has limite
+    '     d warranties.
+    'Please see http://www.Planet-Source-Cod
+    '     e.com/xq/ASP/txtCodeId.7511/lngWId.4/qx/
+    '     vb/scripts/ShowCode.htm
+    'for details.
+    '**************************************
+    
+    '**************************************
+    ' Name: Multidimensional Array Sort 
+    ' function in VB Script
+    '
+    ' It is an enhancment of the multidimens
+    '     ional
+    ' Array Sort function in VB Script by 
+    ' Eric Repec on the 2/4/2001
+    '
+    ' Description:
+    ' This function will sort an array.
+    '
+    ' Parameters:
+    ' laArrIn(): the array to sort
+    ' lnCol: the column to sort on
+    ' lcType: the type of sort to perform
+    '
+    ' Only 2 types of sort at the moment:
+    '	"" - a String Sort
+    '	"date" - a Date Sort
+    '	
+    ' Example of Use:
+    '	SortArray(laArray,1,"")
+    '	SortArray(laArray,2,"date")
+    '
+    ' Returns:
+    '	A Sorted Array variable
+    '
+    ' Enhancements:
+    '	An Order parameter to sort in ASC or D
+    '     ESC
+    '
+    function SortArray(laArrIn(),lnCol,lcType)
+    Dim lnCnti
+    Dim lnCntj
+    Dim lnSmallest_Value
+    Dim lnSmallest_J
+    Dim lnMin
+    Dim lnMax
+    Dim lcTemp
+    
+    lnMin = lbound(laArrIn,2)
+    lnMax = ubound(laArrIn,2)
+    	For lnCnti = lnMin To lnMax - 1
+    		lnSmallest_Value = laArrIn(lnCol,lnCnti)
+    		lnSmallest_J = lnCnti
+    		For lnCntj = lnCnti + 1 To lnMax
+    			if lcType = "" then
+    				' See if laArrIn(lnCntj) is smaller. changed To strComp to work With strings.
+    				if strComp(laArrIn(lnCol,lnCntj),lnSmallest_Value,vbTextCompare) = -1 Then
+    					' Save the new smallest value.
+    					lnSmallest_Value = laArrIn(lnCol,lnCntj)
+    					lnSmallest_J = lnCntj
+    				End if
+    			end if
+    			if lcType = "date" then
+    				' See if laArrIn(lnCntj) is smaller. changed To Japan Dates to work with Dates.
+    				lcstr1 = Replace(ConvertShortDate(laArrIn(lnCol,lnCntj)),"/","")
+    					lcstr2 = Replace(ConvertShortDate(lnSmallest_Value),"/","")
+    					lcback1 = Mid(lcstr1,5,4) & Mid(lcstr1,3,2) & Mid(lcstr1,1,2)
+    					lcback2 = Mid(lcstr2,5,4) & Mid(lcstr2,3,2) & Mid(lcstr2,1,2)
+    				if lcback1 < lcback2 Then
+    					' Save the new smallest value.
+    					lnSmallest_Value = laArrIn(lnCol,lnCntj)
+    					lnSmallest_J = lnCntj
+    				End if
+    			end if
+    		Next 'lnCntj
+    		if lnSmallest_J <> lnCnti Then
+    			' Swap items lnCnti and lnSmallest_J.
+    			For intA = 0 To ubound(laArrIn,1)
+    				lcTemp = laArrIn(intA,lnSmallest_J)
+    				laArrIn(intA,lnSmallest_J) = laArrIn(intA,lnCnti)
+    				laArrIn(intA,lnCnti) = lcTemp
+    			Next 'intA
+    			End if
+    		Next 'lnCnti
+    SortArray = laArrIn
+    End function
+
+
+
+	
+	</script>
+	</head>
+	<body>
+	<h1>Intended Route of Flight Importer v0.2</h1>
+	<hr>
+	<span class="boldNormal">
+	This utility will import a PROF file in the PROF/IROF xml specification into STK.<br>
+	Tested with JMPS FW 1.3.X<br>
+	<br>
+	This converter parses the PROF/IROF file for Altitude, Latitude, Longitude and Time for each waypoint of the exported route.
+	</span>
+	<hr>
+	<span class="boldNormal">Select IROF File:</span><input type="file" id="IROFPath" onChange="getRoutes()"><br>
+	<br>
+	<span class="boldNormal">This file has MISSION ID:</span>
+	
+	<br>
+	<span class="boldNormal">New Aircraft Name: </span><input type="text" id="acNameText" value="IROF_Aircraft" size="15"><br>
+	<br>
+	<span class="boldNormal">Velocity(mi/hr): </span><input type="text" id="acVelText" value= "250" size="5"><br>
+	<br>
+	<input type="button" value="Import IROF" onClick="convertIROF2GA()">
+	</body>
+</html>
